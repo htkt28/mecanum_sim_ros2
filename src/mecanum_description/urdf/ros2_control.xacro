@@ -1,0 +1,60 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+    <!-- Đặt tên hệ thống là GazeboSimSystem cho đồng bộ với plugin -->
+    <ros2_control name="GazeboSimSystem" type="system">
+        <hardware>
+            <!-- Plugin phần cứng chuẩn của Gazebo Harmonic -->
+            <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+        </hardware>
+
+        <!-- Động cơ 1: Bánh trước trái -->
+        <joint name="front_left_wheel_joint">
+            <command_interface name="velocity">
+                <param name="min">-10</param>
+                <param name="max">10</param>
+            </command_interface>
+            <state_interface name="position"/>
+            <state_interface name="velocity"/>
+        </joint>
+
+        <!-- Động cơ 2: Bánh trước phải -->
+        <joint name="front_right_wheel_joint">
+            <command_interface name="velocity">
+                <param name="min">-10</param>
+                <param name="max">10</param>
+            </command_interface>
+            <state_interface name="position"/>
+            <state_interface name="velocity"/>
+        </joint>
+
+        <!-- Động cơ 3: Bánh sau trái -->
+        <joint name="rear_left_wheel_joint">
+            <command_interface name="velocity">
+                <param name="min">-10</param>
+                <param name="max">10</param>
+            </command_interface>
+            <state_interface name="position"/>
+            <state_interface name="velocity"/>
+        </joint>
+
+        <!-- Động cơ 4: Bánh sau phải -->
+        <joint name="rear_right_wheel_joint">
+            <command_interface name="velocity">
+                <param name="min">-10</param>
+                <param name="max">10</param>
+            </command_interface>
+            <state_interface name="position"/>
+            <state_interface name="velocity"/>
+        </joint>
+    </ros2_control>
+
+    <gazebo>
+        <!-- Khai báo Plugin ROS 2 Control cho Gazebo -->
+        <!-- Dùng "libgz_ros2_control-system.so" để đảm bảo hệ thống Linux luôn tìm thấy file thư viện -->
+        <plugin filename="libgz_ros2_control-system.so" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+            <parameters>$(find mecanum_description)/config/controllers.yaml</parameters>
+        </plugin>
+    </gazebo>
+
+</robot>
