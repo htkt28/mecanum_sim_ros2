@@ -25,6 +25,16 @@ def generate_launch_description():
         parameters=[params]
     )
 
+    # [MỚI 1] Phát TF tĩnh nối base_link với base_footprint cho SLAM Toolbox và Nav2
+    node_base_footprint_tf = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='base_footprint_tf_publisher',
+        output='screen',
+        arguments=['0', '0', '0', '0', '0', '0', 'base_link', 'base_footprint'],
+        parameters=[{'use_sim_time': True}]
+    )
+
     gazebo = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([os.path.join(
             get_package_share_directory('ros_gz_sim'), 'launch', 'gz_sim.launch.py')]),
@@ -54,10 +64,18 @@ def generate_launch_description():
         arguments=['joint_state_broadcaster', '--ros-args', '-p', 'use_sim_time:=true'],
     )
 
+    # [MỚI 2] Remap topic tf_odometry của bộ điều khiển Mecanum về /tf chuẩn
     mecanum_controller_spawner = Node(
         package='controller_manager',
         executable='spawner',
-        arguments=['mecanum_base_controller', '--ros-args', '-p', 'use_sim_time:=true'],
+        arguments=[
+            'mecanum_base_controller',
+            '--controller-ros-args',
+            '-r /mecanum_base_controller/tf_odometry:=/tf',
+            '--ros-args',
+            '-p',
+            'use_sim_time:=true'
+        ],
     )
 
     delayed_controllers = RegisterEventHandler(
@@ -70,6 +88,7 @@ def generate_launch_description():
     return LaunchDescription([
         gazebo,
         node_robot_state_publisher,
+        node_base_footprint_tf,
         spawn_entity,
         ros_gz_bridge,
         delayed_controllers
