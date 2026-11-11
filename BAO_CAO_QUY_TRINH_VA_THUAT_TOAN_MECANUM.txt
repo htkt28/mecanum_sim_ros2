@@ -1,0 +1,436 @@
+================================================================================
+BÁO CÁO TỔNG HỢP ĐỀ TÀI: HỆ THỐNG XE TỰ HÀNH ĐA HƯỚNG 4 BÁNH MECANUM
+TRÊN NỀN TẢNG ROS 2 JAZZY & GAZEBO HARMONIC
+Workspace: /home/huyqn/mecanum_sim_ws
+================================================================================
+
+MỤC LỤC:
+  I.   SƠ ĐỒ KIẾN TRÚC LUỒNG DỮ LIỆU TỔNG THỂ
+  II.  QUY TRÌNH THỰC HIỆN ĐỀ TÀI TỪ ĐẦU ĐẾN HIỆN TẠI (6 GIAI ĐOẠN)
+  III. PHÂN TÍCH CHI TIẾT CÁC THUẬT TOÁN & CÔNG THỨC TOÁN HỌC ĐÃ ÁP DỤNG
+       1. Động học Thuận & Nghịch Robot 4 bánh Mecanum (Holonomic Kinematics)
+       2. Mô phỏng Ma sát Dị hướng (Anisotropic Coulomb Friction) trên Gazebo
+       3. Hợp nhất Cảm biến bằng Bộ lọc Kalman Mở rộng (EKF - robot_localization)
+       4. Lập bản đồ Pose-Graph SLAM & Tối ưu hóa Đồ thị Ceres (SLAM Toolbox)
+       5. Định vị Monte Carlo Thích nghi Đa hướng (AMCL - OmniMotionModel)
+       6. Bản đồ Chi phí Đa lớp (Layered Costmap 2D) & Quy hoạch đường đi A*
+       7. Điều khiển Dự báo Tích phân Đường dẫn Đa hướng (MPPI Controller - Omni)
+       8. Làm mượt Vận tốc (VelocitySmoother) & Giám sát Va chạm (CollisionMonitor)
+  IV.  BẢNG ÁNH XẠ THUẬT TOÁN VÀ FILE CẤU HÌNH TRONG WORKSPACE
+
+================================================================================
+I. SƠ ĐỒ KIẾN TRÚC LUỒNG DỮ LIỆU TỔNG THỂ
+================================================================================
+
+  +--------------------------------------------------------------------------+
+  | 1. TẦNG VẬT LÝ & CẢM BIẾN (Gazebo Harmonic / Phần cứng thực tế)          |
+  |  - Mô hình URDF/Xacro (robot_core.xacro, lidar.xacro, imu.xacro)         |
+  |  - Encoder 4 bánh Mecanum  ---> Vận tốc góc thực tế (w_FL, w_FR, w_RL, w_RR)
+  |  - LiDAR LDobot LD14       ---> Quét 360 độ (6 Hz, 383 mẫu, 0.15m - 8.0m)|
+  |  - IMU 6 trục MPU6050      ---> Vận tốc góc gz & Góc hướng Yaw (100 Hz)  |
+  +--------------------------------------------------------------------------+
+                 |                               |                   |
+      (Encoder: /wheel/odom)             (IMU: /imu/data)     (LiDAR: /scan)
+                 v                               v                   |
+  +--------------------------------------------------------------+   |
+  | 2. TẦNG HỢP NHẤT CẢM BIẾN EKF (robot_localization - 50 Hz)   |   |
+  |  - Lấy vận tốc dài (vx, vy) từ Encoder 4 bánh                |   |
+  |  - Lấy góc hướng (yaw) & vận tốc góc (vyaw) từ MPU6050       |   |
+  |  - Xuất Odometry chuẩn (/odom) & phát TF (odom -> base_link) |   |
+  +--------------------------------------------------------------+   |
+                                 |                                   |
+                         (/odom & TF odom)                           |
+                                 v                                   v
+  +--------------------------------------------------------------------------+
+  | 3. TẦNG LẬP BẢN ĐỒ & ĐỊNH VỊ TOÀN CỤC (SLAM Toolbox / AMCL)             |
+  |  - Chế độ SLAM: Pose-Graph SLAM + Ceres Solver ---> Bản đồ 2D (/map)     |
+  |  - Chế độ Nav2: AMCL (OmniMotionModel) + Map Server ---> TF (map -> odom)|
+  +--------------------------------------------------------------------------+
+                                 |
+                     (TF: map -> odom -> base_link)
+                                 v
+  +--------------------------------------------------------------------------+
+  | 4. TẦNG ĐIỀU HƯỚNG TỰ HÀNH ĐA HƯỚNG (Nav2 Holonomic Stack)               |
+  |  - Layered Costmap 2D (Static + Obstacle/Voxel + Inflation Layer)        |
+  |  - Global Planner (NavfnPlanner - Thuật toán A*) ---> Quỹ đạo (/plan)    |
+  |  - Local Controller (MPPI Controller - Mô hình Omni 2000 quỹ đạo)        |
+  |  - Velocity Smoother (3 trục vx, vy, wz) & Collision Monitor             |
+  +--------------------------------------------------------------------------+
+                                 |
+                     (Lệnh vận tốc /cmd_vel: Twist)
+                                 v
+  +--------------------------------------------------------------------------+
+  | 5. TẦNG ĐIỀU KHIỂN ĐỘNG HỌC (twist_stamper + MecanumDriveController)     |
+  |  - Chuyển đổi Twist -> TwistStamped (/mecanum_base_controller/reference) |
+  |  - Động học Nghịch Mecanum ---> Lệnh vận tốc góc 4 bánh (w1, w2, w3, w4) |
+  +--------------------------------------------------------------------------+
+
+
+================================================================================
+II. QUY TRÌNH THỰC HIỆN ĐỀ TÀI TỪ ĐẦU ĐẾN HIỆN TẠI (6 GIAI ĐOẠN)
+================================================================================
+
+GIAI ĐOẠN 1: Thiết kế Mô hình Cơ khí 3D (URDF/Xacro) & Vật lý Bánh xe Mecanum
+--------------------------------------------------------------------------------
+* Các file liên quan:
+  - src/mecanum_description/urdf/robot_core.xacro
+  - src/mecanum_description/launch/display.launch.py
+  - src/mecanum_description/rviz/display.rviz
+* Các bước đã thực hiện:
+  1. Khai báo kích thước hình học khung gầm (chassis: 0.30 x 0.24 x 0.11 m,
+     nặng 4.4 kg) và 4 bánh xe Mecanum (bán kính r = 0.0485 m, dày 0.048 m,
+     nặng 0.15 kg/bánh; khoảng cách đặt bánh Lx = 0.125 m, Ly = 0.150 m).
+  2. Xây dựng các macro tự động tính ma trận quán tính (inertial_box,
+     inertial_cylinder) và hạ thấp trọng tâm thân xe xuống z = -0.05 m để
+     chống lật khi xe trượt ngang hoặc tăng/giảm tốc đột ngột.
+  3. Chuẩn hóa cây tọa độ TF theo REP-105: giữ base_link làm gốc để bảo toàn
+     hệ quy chiếu vật lý trong Gazebo, đồng thời gắn cố định base_footprint
+     vào base_link ngay trong URDF.
+  4. Mô phỏng đặc tính trượt chéo 45 độ của con lăn Mecanum trong Gazebo
+     Harmonic bằng va chạm hình cầu (sphere collision) kết hợp vector hướng
+     ma sát dị hướng fdir1.
+
+GIAI ĐOẠN 2: Tích hợp Hệ thống Điều khiển ros2_control & Cầu nối Vận tốc
+--------------------------------------------------------------------------------
+* Các file liên quan:
+  - src/mecanum_description/urdf/ros2_control.xacro
+  - src/mecanum_description/config/controllers.yaml
+  - src/mecanum_description/launch/gazebo.launch.py
+* Các bước đã thực hiện:
+  1. Tích hợp plugin phần cứng gz_ros2_control/GazeboSimSystem điều khiển
+     vận tốc góc (velocity command interface, dải [-30, 30] rad/s) cho 4 bánh.
+  2. Cấu hình joint_state_broadcaster và mecanum_drive_controller hoạt động
+     ở tần số 50 Hz, đồng bộ khoảng cách hình học Lx + Ly = 0.275 m.
+  3. Thiết lập reference_timeout = 0.5 s để khắc phục lỗi tự động reset vận tốc
+     sau mỗi 20ms trên ROS 2 Jazzy và đảm bảo tự phanh an toàn khi mất tín hiệu.
+  4. Tích hợp node twist_stamper tự động chuyển đổi bản tin /cmd_vel (Twist)
+     từ Teleop hoặc Nav2 sang TwistStamped cho bộ điều khiển Mecanum.
+
+GIAI ĐOẠN 3: Mô hình hóa Bản sao số (Digital Twin) cho LiDAR LD14 & IMU MPU6050
+--------------------------------------------------------------------------------
+* Các file liên quan:
+  - src/mecanum_description/urdf/lidar.xacro
+  - src/mecanum_description/urdf/imu.xacro
+  - src/mecanum_description/config/gz_bridge.yaml
+* Các bước đã thực hiện:
+  1. LiDAR LDobot LD14: Mô phỏng đúng kích thước thực (bán kính tháp quay 27mm,
+     cao 38.8mm, nặng 143g), tốc độ quét 6 Hz, tốc độ lấy mẫu 2300 điểm/s
+     (~383 mẫu/vòng 360 độ), tầm đo 0.15m - 8.0m kèm nhiễu Gaussian +-1cm.
+  2. IMU 6 trục MPU6050 (module GY-521): Đặt tại tâm xoay base_link (x=0, y=0)
+     để triệt tiêu gia tốc hướng tâm, tần số xuất 100 Hz qua topic /imu/data,
+     mô phỏng nhiễu nhiệt và độ trôi bias thực tế của con quay hồi chuyển
+     (stddev = 0.00087 rad/s) và gia tốc kế (stddev = 0.039 m/s^2).
+  3. Cấu hình ros_gz_bridge chuyển tiếp /clock, /scan và /imu/data từ Gazebo
+     sang ROS 2.
+
+GIAI ĐOẠN 4: Hợp nhất Cảm biến (Sensor Fusion) bằng Bộ lọc Kalman Mở rộng (EKF)
+--------------------------------------------------------------------------------
+* Các file liên quan:
+  - src/mecanum_description/config/ekf.yaml
+  - src/mecanum_description/config/controllers.yaml
+  - src/mecanum_description/launch/gazebo.launch.py
+* Các bước đã thực hiện:
+  1. Tắt phát TF trực tiếp từ bánh xe (enable_odom_tf: false) và chuyển
+     Odometry thô của bánh xe sang topic /wheel/odom.
+  2. Triển khai node ekf_filter_node (gói robot_localization) chạy ở 50 Hz,
+     chế độ phẳng 2D (two_d_mode: true):
+     - Chỉ lấy vận tốc tịnh tiến (vx, vy) từ Encoder 4 bánh (/wheel/odom).
+     - Lấy góc hướng (yaw) và vận tốc góc (vyaw) từ Gyroscope MPU6050 (/imu/data).
+     - Xuất Odometry đã lọc ra /odom và phát TF (odom -> base_link) chống trượt.
+
+GIAI ĐOẠN 5: Xây dựng Thế giới Ảo có Vật cản & Lập Bản đồ với SLAM Toolbox
+--------------------------------------------------------------------------------
+* Các file liên quan:
+  - src/mecanum_description/worlds/obstacles.sdf
+  - src/mecanum_description/config/slam_params.yaml
+  - src/mecanum_description/launch/slam.launch.py
+  - src/mecanum_description/maps/my_gazebo_map.yaml & .pgm
+* Các bước đã thực hiện:
+  1. Thiết kế phòng thử nghiệm 10m x 10m có tường bao, vách chữ L, cột trụ tròn
+     và hành lang hẹp bất đối xứng để kiểm thử trượt ngang và tránh đa nghĩa
+     hình học khi định vị.
+  2. Tinh chỉnh SLAM Toolbox (chế độ online_async) khớp với tầm đo 8.0m của
+     LD14, cập nhật quét mỗi khi xe dịch chuyển 0.2m hoặc xoay 0.2 rad, và
+     lưu thành công bản đồ tĩnh độ phân giải 0.05 m/pixel.
+
+GIAI ĐOẠN 6: Điều hướng Tự hành Đa hướng (Holonomic Navigation) với Nav2
+--------------------------------------------------------------------------------
+* Các file liên quan:
+  - src/mecanum_description/config/nav2_params.yaml
+  - src/mecanum_description/launch/navigation.launch.py
+  - src/mecanum_description/rviz/mecanum.rviz
+* Các bước đã thực hiện:
+  1. Cấu hình AMCL sử dụng mô hình chuyển động đa hướng nav2_amcl::OmniMotionModel
+     và tự động khởi tạo vị trí ban đầu set_initial_pose: true tại (0, 0, 0)
+     để tránh lỗi timeout của global_costmap khi mới bật Nav2.
+  2. Mở khóa ngưỡng vận tốc ngang min_y_velocity_threshold = 0.001 m/s và
+     mở giới hạn vận tốc trục Y trong velocity_smoother.
+  3. Cấu hình bộ điều khiển dự báo MPPI Controller ở chế độ Omni kết hợp
+     TwirlingCritic và PathAngleCritic (mode 2) giúp xe di chuyển đa hướng
+     mượt mà qua hành lang hẹp.
+
+
+================================================================================
+III. PHÂN TÍCH CHI TIẾT CÁC THUẬT TOÁN & CÔNG THỨC TOÁN HỌC ĐÃ ÁP DỤNG
+================================================================================
+
+--------------------------------------------------------------------------------
+1. THUẬT TOÁN ĐỘNG HỌC THUẬN & NGHỊCH ROBOT 4 BÁNH MECANUM (HOLONOMIC KINEMATICS)
+--------------------------------------------------------------------------------
+Nằm trong bộ điều khiển mecanum_drive_controller, thuật toán thực hiện ánh xạ
+giữa vector vận tốc thân xe [vx, vy, wz]^T tại tâm base_link và vận tốc góc của
+4 bánh xe [w_FL, w_FR, w_RL, w_RR]^T.
+
+* Thông số hình học của xe:
+  - Bán kính bánh xe: r = 0.0485 m
+  - Nửa khoảng cách trục trước - sau: Lx = 0.125 m
+  - Nửa khoảng cách bánh trái - phải: Ly = 0.150 m
+  - Tổng hình chiếu tâm bánh: L = Lx + Ly = 0.125 + 0.150 = 0.275 m
+
+a) Phương trình Động học Nghịch (Inverse Kinematics - Tính tốc độ 4 motor):
+   Khi nhận lệnh vận tốc mong muốn (vx, vy, wz) từ /cmd_vel:
+
+     w_FL = (1 / r) * [ vx - vy - (Lx + Ly) * wz ]
+     w_FR = (1 / r) * [ vx + vy + (Lx + Ly) * wz ]
+     w_RL = (1 / r) * [ vx + vy - (Lx + Ly) * wz ]
+     w_RR = (1 / r) * [ vx - vy + (Lx + Ly) * wz ]
+
+   Ý nghĩa vật lý:
+   - Đi thẳng (vx > 0, vy = 0, wz = 0): Cả 4 bánh quay tiến cùng tốc độ, thành
+     phần lực ngang của các con lăn 45 độ tự triệt tiêu lẫn nhau.
+   - Trượt ngang sang trái (vx = 0, vy > 0, wz = 0): Cặp chéo (FR, RL) quay tiến,
+     cặp chéo (FL, RR) quay lùi; lực dọc triệt tiêu, hợp lực đẩy xe sang trái.
+   - Xoay tại chỗ (vx = 0, vy = 0, wz > 0): Hai bánh phải quay tiến, hai bánh
+     trái quay lùi.
+
+b) Phương trình Động học Thuận (Forward Kinematics - Tính Odometry từ Encoder):
+   Từ tốc độ góc thực tế đo được trên 4 bánh (w_FL, w_FR, w_RL, w_RR):
+
+     vx = (r / 4) * (  w_FL + w_FR + w_RL + w_RR )
+     vy = (r / 4) * ( -w_FL + w_FR + w_RL - w_RR )
+     wz = (r / (4 * (Lx + Ly))) * ( -w_FL + w_FR - w_RL + w_RR )
+
+   Tư thế của xe (x, y, yaw) trong hệ tọa độ odom được tích phân theo phương
+   pháp Runge-Kutta bậc 2 (RK2) ở mỗi chu kỳ dt = 0.02s (50 Hz):
+
+     yaw_mid = yaw_{k-1} + 0.5 * wz * dt
+     x_k     = x_{k-1}   + (vx * cos(yaw_mid) - vy * sin(yaw_mid)) * dt
+     y_k     = y_{k-1}   + (vx * sin(yaw_mid) + vy * cos(yaw_mid)) * dt
+     yaw_k   = yaw_{k-1} + wz * dt
+
+
+--------------------------------------------------------------------------------
+2. THUẬT TOÁN MÔ PHỎNG MA SÁT DỊ HƯỚNG (ANISOTROPIC COULOMB FRICTION)
+--------------------------------------------------------------------------------
+Trên bánh Mecanum thật, các con lăn thụ động (passive rollers) đặt nghiêng 45 độ
+so với trục quay của bánh. Khi tiếp xúc với mặt sàn:
+  - Phương vuông góc với trục con lăn: Con lăn bị khóa cứng -> hệ số ma sát lớn
+    (mu = 2.0), đóng vai trò truyền lực đẩy cho xe.
+  - Phương dọc theo trục con lăn: Con lăn lăn tự do trên bạc đạn -> hệ số ma sát
+    triệt tiêu (mu2 = 0.0).
+
+Trong robot_core.xacro, Gazebo Harmonic (engine vật lý DART) sử dụng hình cầu
+tiếp xúc 1 điểm kết hợp vector chỉ phương của lực ma sát chính fdir1 trong hệ
+tọa độ base_link:
+  - Cặp bánh Trước-Trái (FL) & Sau-Phải (RR): fdir1 = [1, -1, 0] (góc -45 độ)
+  - Cặp bánh Trước-Phải (FR) & Sau-Trái (RL): fdir1 = [1,  1, 0] (góc +45 độ)
+
+Nhờ thuật toán phân tách ma sát theo phương fdir1 này, mô phỏng đạt độ chính xác
+vật lý cao mà không cần vẽ hàng chục khớp quay con lăn gây nặng CPU.
+
+
+--------------------------------------------------------------------------------
+3. THUẬT TOÁN HỢP NHẤT CẢM BIẾN BẰNG BỘ LỌC KALMAN MỞ RỘNG (EKF)
+--------------------------------------------------------------------------------
+Bánh xe Mecanum khi trượt ngang có độ trượt con lăn (roller slip) đáng kể, làm
+cho góc hướng (yaw) tính từ Encoder bị trôi nhanh khi xe xoay. Ngược lại, con
+quay hồi chuyển (Gyroscope) trên MPU6050 đo vận tốc góc trực tiếp mà không phụ
+thuộc vào ma sát mặt sàn.
+
+Bộ lọc EKF (ekf_filter_node trong ekf.yaml) chạy ở tần số 50 Hz với chế độ
+phẳng 2D (two_d_mode: true), ước lượng vector trạng thái 6 chiều:
+
+     X_k = [ x,  y,  yaw,  vx,  vy,  vyaw ]^T
+
+Thuật toán gồm 2 bước lặp liên tục mỗi 20ms:
+
+a) Bước Dự báo (Prediction Step):
+   Dự báo trạng thái kế tiếp dựa trên mô hình động học phi tuyến f(X_{k-1}) và
+   cập nhật ma trận hiệp phương sai sai số P_k(-) thông qua ma trận Jacobian
+   F_k = df/dX:
+
+     P_k(-) = F_k * P_{k-1} * F_k^T + Q_k   (với Q_k là nhiễu quá trình)
+
+b) Bước Cập nhật Đo lường (Measurement Update Step):
+   - Khi nhận /wheel/odom (từ 4 Encoder): Chỉ trích xuất [vx, vy] (bỏ qua yaw
+     và vyaw của bánh xe để tránh sai số trượt).
+   - Khi nhận /imu/data (từ MPU6050 ở 100 Hz): Trích xuất [yaw, vyaw] từ
+     con quay hồi chuyển.
+   - Tính hệ số lợi Kalman (Kalman Gain) K_k và cập nhật trạng thái tối ưu:
+
+     K_k = P_k(-) * H_k^T * [ H_k * P_k(-) * H_k^T + R_k ]^(-1)
+     X_k = X_k(-) + K_k * [ Z_k - H_k * X_k(-) ]
+     P_k = (I - K_k * H_k) * P_k(-)
+
+
+--------------------------------------------------------------------------------
+4. THUẬT TOÁN POSE-GRAPH SLAM & TỐI ƯU HÓA CERES SOLVER (SLAM TOOLBOX)
+--------------------------------------------------------------------------------
+Được cấu hình trong slam_params.yaml, SLAM Toolbox sử dụng phương pháp Đồ thị
+Tư thế (Pose-Graph SLAM) kết hợp khớp quét tương quan (Correlation Scan Matcher):
+
+1. Xây dựng Đồ thị Tư thế (Graph Construction):
+   - Mỗi khi xe đi được >= 0.2m hoặc xoay >= 0.2 rad, một Đỉnh (Node) mới mang
+     tọa độ X_i = [x_i, y_i, yaw_i]^T cùng dữ liệu quét LD14 (383 tia, tầm 8.0m)
+     được thêm vào đồ thị.
+   - Giữa 2 đỉnh liên tiếp có một Cạnh (Edge) lưu phép biến đổi tương đối Z_ij
+     tính từ EKF Odometry và được tinh chỉnh bằng thuật toán Correlation Scan
+     Matching (quét lưới tương quan chéo trong vùng 0.5m, độ phân giải 1cm).
+
+2. Phát hiện Khép vòng (Loop Closure Detection):
+   - Khi xe di chuyển lại gần khu vực cũ trong bán kính 3.0m, thuật toán so khớp
+     thô - tinh (Coarse-to-Fine) kiểm tra phép quét hiện tại với các đỉnh trong
+     quá khứ. Nếu độ trùng khớp vượt ngưỡng 0.45, một cạnh khép vòng được nối
+     giữa đỉnh hiện tại và đỉnh cũ.
+
+3. Tối ưu hóa Bình phương Tối thiểu Phi tuyến (Ceres Solver):
+   - Bộ giải Google Ceres sử dụng thuật toán Levenberg-Marquardt kết hợp phân rã
+     ma trận thưa Sparse Normal Cholesky (SPARSE_NORMAL_CHOLESKY) và bộ tiền
+     điều kiện Schur-Jacobi để cực tiểu hóa tổng sai số trên toàn bộ các cạnh:
+
+     min Sum_{(i,j)} [ e_ij(X_i, X_j)^T * Omega_ij * e_ij(X_i, X_j) ]
+
+   - Kết quả là toàn bộ bản đồ được nắn thẳng và khử sạch sai số tích lũy.
+
+
+--------------------------------------------------------------------------------
+5. THUẬT TOÁN ĐỊNH VỊ MONTE CARLO THÍCH NGHI ĐA HƯỚNG (AMCL - OMNIMOTIONMODEL)
+--------------------------------------------------------------------------------
+Khi chạy tự hành trên bản đồ tĩnh my_gazebo_map.yaml, AMCL ước lượng tư thế của
+xe trong hệ tọa độ map bằng Bộ lọc Hạt (Particle Filter) với 500 - 2000 hạt:
+
+1. Mô hình Chuyển động Đa hướng (nav2_amcl::OmniMotionModel):
+   Khác với xe 2 bánh vi sai chỉ có tiến và xoay, OmniMotionModel phân rã chuyển
+   động của xe Mecanum thành 3 thành phần độc lập: dịch dọc (dx), dịch ngang
+   strafe (dy) và xoay (dyaw), đồng thời lấy mẫu nhiễu Gaussian theo 5 hệ số
+   alpha1..alpha5 = 0.2 để dịch chuyển đám mây hạt theo đúng quỹ đạo trượt ngang.
+
+2. Mô hình Đo lường Trường Hợp lý (Likelihood Field Model):
+   Chiếu 60 tia laser từ LD14 của mỗi hạt lên bản đồ tĩnh. Khoảng cách d_k từ
+   điểm cuối tia laser đến vật cản gần nhất trên bản đồ được dùng để tính xác
+   suất (trọng số w) của hạt đó theo hàm phân phối chuẩn exp(-d_k^2 / (2*sigma^2)).
+
+3. Lấy mẫu lại Thích nghi (KLD-Sampling):
+   Tự động dùng nhiều hạt (tới 2000 hạt) khi độ bất định vị trí cao và thu gọn
+   về 500 hạt khi đám mây hạt đã hội tụ chặt quanh vị trí thực của xe.
+
+
+--------------------------------------------------------------------------------
+6. BẢN ĐỒ CHI PHÍ ĐA LỚP (LAYERED COSTMAP 2D) & QUY HOẠCH ĐƯỜNG ĐI TOÀN CỤC A*
+--------------------------------------------------------------------------------
+a) Bản đồ Chi phí Đa lớp (Local & Global Costmap - độ phân giải 0.05m/ô):
+   Kết hợp 3 lớp dữ liệu chồng lên nhau:
+   - Static Layer: Vật cản cố định từ bản đồ tĩnh (/map).
+   - Obstacle / Voxel Layer: Chướng ngại vật thời gian thực từ LiDAR LD14 (/scan).
+   - Inflation Layer: Thổi phồng vùng an toàn quanh vật cản với bán kính
+     inflation_radius = 0.45m theo hàm suy giảm mũ:
+
+       Cost(d) = exp( -3.0 * (d - r_inscribed) ) * 252
+
+     kết hợp đa giác khung bao thực tế của xe (footprint: 0.36m x 0.36m).
+
+b) Quy hoạch Đường đi Toàn cục bằng Thuật toán A* (NavfnPlanner, use_astar: true):
+   Tìm đường đi tối ưu từ vị trí hiện tại S tới điểm đích G trên global_costmap
+   bằng cách mở rộng các ô lưới theo hàm đánh giá:
+
+       f(n) = g(n) + h(n)
+
+   Trong đó:
+   - g(n): Tổng chi phí đường đi tích lũy từ S tới ô n (cộng cả khoảng cách hình
+     học và chi phí vùng lạm phát Cost(n) để giữ đường đi cách xa tường).
+   - h(n): Khoảng cách Euclid ước lượng từ ô n tới đích G, giúp thuật toán hướng
+     thẳng về phía đích nhanh gấp nhiều lần thuật toán Dijkstra.
+   - Sau đó SimpleSmoother làm trơn đường gấp khúc thành quỹ đạo /plan mượt mà.
+
+
+--------------------------------------------------------------------------------
+7. THUẬT TOÁN ĐIỀU KHIỂN DỰ BÁO ĐA HƯỚNG MPPI (MPPI CONTROLLER - OMNI)
+--------------------------------------------------------------------------------
+Được cấu hình trong nav2_params.yaml, Model Predictive Path Integral (MPPI) là
+thuật toán điều khiển tối ưu ngẫu nhiên hiện đại chạy ở tần số 20 Hz (50ms/chu kỳ):
+
+1. Lấy mẫu Ngẫu nhiên Song song (Rollout Sampling):
+   Ở mỗi chu kỳ, từ chuỗi lệnh điều khiển trước đó, MPPI sinh ra K = 2000 chuỗi
+   vận tốc thử nghiệm (vx, vy, wz) trên chân trời dự báo T = 56 bước thời gian
+   (dt = 0.05s -> nhìn trước 2.8 giây) bằng cách cộng nhiễu Gaussian.
+
+2. Mô phỏng Động học Đa hướng (motion_model: "Omni"):
+   Phóng chiếu đồng thời cả 2000 quỹ đạo đa hướng trong không gian (x, y, yaw).
+
+3. Chấm điểm Đa mục tiêu (8 hàm Critics):
+   Mỗi quỹ đạo thử nghiệm thứ k được tính tổng chi phí phạt S_k từ 8 tiêu chí:
+   - CostCritic (consider_footprint: true): Phạt nặng nếu khung xe 0.36x0.36m
+     tiến gần vật cản.
+   - PathAlignCritic & PathFollowCritic: Bám sát quỹ đạo toàn cục /plan.
+   - GoalCritic & GoalAngleCritic: Đưa xe về đúng vị trí và góc hướng tại đích.
+   - PathAngleCritic (mode: 2): Cho phép xe giữ nguyên hướng mũi xe để trượt
+     ngang (strafing) qua hành lang hẹp thay vì bắt buộc phải xoay đầu xe.
+   - TwirlingCritic (weight: 10.0): Chống hiện tượng xe tự xoay tròn vô ích khi
+     đang di chuyển đa hướng.
+   - ConstraintCritic: Giữ vận tốc và gia tốc trong ngưỡng vật lý cho phép.
+
+4. Tổng hợp Lệnh Điều khiển Tối ưu bằng Trọng số Softmax:
+   Lệnh vận tốc xuất ra là tổ hợp lồi có trọng số mũ của cả 2000 quỹ đạo (với
+   nhiệt độ lambda = 0.3):
+
+     w_k = exp( -(S_k - S_min) / lambda )
+     u*  = Sum( w_k * u_k ) / Sum( w_k )
+
+
+--------------------------------------------------------------------------------
+8. LÀM MƯỢT VẬN TỐC (VELOCITY SMOOTHER) & GIÁM SÁT VA CHẠM (COLLISION MONITOR)
+--------------------------------------------------------------------------------
+1. Velocity Smoother (20 Hz):
+   Giới hạn gia tốc trên cả 3 bậc tự do:
+   - Vận tốc tối đa:  vx in [-0.5, 0.5] m/s, vy in [-0.5, 0.5] m/s, wz in [-1.0, 1.0] rad/s
+   - Gia tốc tối đa:  [ 0.6,  0.6,  1.0] (m/s^2, rad/s^2)
+   - Giảm tốc tối đa: [-0.8, -0.8, -1.2] (m/s^2, rad/s^2)
+   Giúp xe tăng/giảm tốc êm ái, chống trượt bánh và bảo vệ hộp số động cơ.
+
+2. Collision Monitor (Chế độ FootprintApproach):
+   Phóng chiếu khung bao 0.36m x 0.36m của xe về phía trước 1.2 giây theo vector
+   vận tốc thực tế và kiểm tra trực tiếp với tia quét /scan từ LiDAR LD14. Nếu
+   có vật cản cắt ngang trong khoảng 1.2 giây tới, hệ thống tự động hạ vận tốc
+   về 0 để tránh va chạm tức thời.
+
+
+================================================================================
+IV. BẢNG ÁNH XẠ THUẬT TOÁN VÀ FILE CẤU HÌNH TRONG WORKSPACE
+================================================================================
+
+1. Mô hình cơ khí & Ma sát dị hướng fdir1:
+   -> src/mecanum_description/urdf/robot_core.xacro
+
+2. Giao diện phần cứng ros2_control:
+   -> src/mecanum_description/urdf/ros2_control.xacro
+
+3. Động học Thuận/Nghịch Mecanum & RateLimiter:
+   -> src/mecanum_description/config/controllers.yaml
+
+4. Mô phỏng cảm biến LiDAR LDobot LD14 (6 Hz, 8.0m):
+   -> src/mecanum_description/urdf/lidar.xacro
+
+5. Mô phỏng cảm biến IMU 6 trục MPU6050 (100 Hz):
+   -> src/mecanum_description/urdf/imu.xacro
+
+6. Hợp nhất cảm biến Extended Kalman Filter (EKF):
+   -> src/mecanum_description/config/ekf.yaml
+
+7. Thuật toán Pose-Graph SLAM & Ceres Solver:
+   -> src/mecanum_description/config/slam_params.yaml
+   -> src/mecanum_description/launch/slam.launch.py
+
+8. Thuật toán AMCL Omni, Costmap 2D, A*, MPPI Omni, Velocity Smoother:
+   -> src/mecanum_description/config/nav2_params.yaml
+   -> src/mecanum_description/launch/navigation.launch.py
+================================================================================

@@ -1,52 +1,54 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
 
-    <!-- 1. Khớp nối cố định (Tính toán trục Z chính xác từ tâm thân xe) -->
+    <!-- Thông số thực tế của LiDAR LDobot LD14 (96.3 x 59.8 x 38.8 mm, nặng 143g) -->
+    <xacro:property name="lidar_radius" value="0.027"/>
+    <xacro:property name="lidar_length" value="0.0388"/>
+    <xacro:property name="lidar_mass" value="0.143"/>
+
+    <!-- 1. Khớp nối cố định đặt LD14 trên nóc thân xe -->
     <joint name="laser_joint" type="fixed">
         <parent link="chassis"/>
         <child link="laser_frame"/>
-        <!-- Z = 0.055m (nửa thân xe) + 0.035m (nửa lidar) = 0.09m -->
-        <origin xyz="0 0 0.09" rpy="0 0 0"/>
+        <origin xyz="0 0 ${(chassis_height + lidar_length)/2}" rpy="0 0 0"/>
     </joint>
 
-    <!-- 2. Khung vật lý của LiDAR (Dày 7cm) -->
+    <!-- 2. Khung vật lý của LD14 -->
     <link name="laser_frame">
         <visual>
             <geometry>
-                <cylinder radius="0.03" length="0.07"/>
+                <cylinder radius="${lidar_radius}" length="${lidar_length}"/>
             </geometry>
-            <material name="black">
-                <color rgba="0 0 0 1"/>
-            </material>
+            <material name="black"/>
         </visual>
         <collision>
             <geometry>
-                <cylinder radius="0.03" length="0.07"/>
+                <cylinder radius="${lidar_radius}" length="${lidar_length}"/>
             </geometry>
         </collision>
-        <inertial>
-            <mass value="0.1"/>
+        <xacro:inertial_cylinder mass="${lidar_mass}" length="${lidar_length}" radius="${lidar_radius}">
             <origin xyz="0 0 0" rpy="0 0 0"/>
-            <inertia ixx="0.00003" ixy="0" ixz="0" iyy="0.00003" iyz="0" izz="0.000045"/>
-        </inertial>
+        </xacro:inertial_cylinder>
     </link>
 
-    <!-- 3. Cấu hình Cảm biến ảo cho Gazebo Harmonic -->
+    <!-- 3. Cấu hình cảm biến sát thông số datasheet LDobot LD14:
+         - Tần số quay (update_rate): 6 Hz
+         - Tốc độ lấy mẫu: 2300 điểm/s -> ~383 điểm / vòng 360 độ
+         - Tầm đo: 0.15m - 8.0m, nhiễu tam giác lượng ~1cm -->
     <gazebo reference="laser_frame">
-        <material>Gazebo/Black</material>
-        <sensor name="laser" type="gpu_lidar">
+        <sensor name="ld14_lidar" type="gpu_lidar">
             <pose>0 0 0 0 0 0</pose>
+            <always_on>true</always_on>
             <visualize>true</visualize>
-            <update_rate>10</update_rate>
+            <update_rate>6</update_rate>
 
             <topic>/scan</topic>
-            <!-- Bắt buộc giữ dòng này để đồng bộ tên frame với RViz -->
             <gz_frame_id>laser_frame</gz_frame_id>
-            
+
             <ray>
                 <scan>
                     <horizontal>
-                        <samples>360</samples>
+                        <samples>383</samples>
                         <resolution>1</resolution>
                         <min_angle>-3.14159</min_angle>
                         <max_angle>3.14159</max_angle>
@@ -54,14 +56,19 @@
                 </scan>
                 <range>
                     <min>0.15</min>
-                    <max>12.0</max>
+                    <max>8.0</max>
                     <resolution>0.01</resolution>
                 </range>
+                <noise>
+                    <type>gaussian</type>
+                    <mean>0.0</mean>
+                    <stddev>0.01</stddev>
+                </noise>
             </ray>
         </sensor>
     </gazebo>
 
-    <!-- 4. Khởi động hệ thống tính toán Cảm biến của Gazebo -->
+    <!-- 4. Khởi động hệ thống tính toán Cảm biến quang học của Gazebo -->
     <gazebo>
         <plugin filename="libgz-sim-sensors-system.so" name="gz::sim::systems::Sensors">
             <render_engine>ogre2</render_engine>

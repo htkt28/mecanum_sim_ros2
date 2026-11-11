@@ -1,17 +1,19 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" xmlns:gz="http://gazebosim.org/schema" name="mecanum_robot">
 
-    <!-- 1. KHAI BÁO KÍCH THƯỚC (Dễ dàng thay đổi sau này) -->
+    <!-- 1. KHAI BÁO KÍCH THƯỚC THÂN XE -->
     <xacro:property name="chassis_length" value="0.3"/>
     <xacro:property name="chassis_width" value="0.24"/>
     <xacro:property name="chassis_height" value="0.11"/>
-    
-    <!-- 2. Kích thước Bánh xe Mecanum -->
+    <xacro:property name="chassis_mass" value="4.4"/>
+
+    <!-- 2. KÍCH THƯỚC BÁNH XE MECANUM -->
     <xacro:property name="wheel_radius" value="0.0485"/>
     <xacro:property name="wheel_thickness" value="0.048"/>
+    <xacro:property name="wheel_mass" value="0.15"/>
 
-    <!-- 3. Tọa độ đặt bánh -->
-    <xacro:property name="wheel_offset_x" value="0.125"/> 
+    <!-- 3. TỌA ĐỘ ĐẶT BÁNH (Lx + Ly = 0.125 + 0.15 = 0.275m) -->
+    <xacro:property name="wheel_offset_x" value="0.125"/>
     <xacro:property name="wheel_offset_y" value="0.15"/>
 
     <!-- ================= CÔNG THỨC TÍNH QUÁN TÍNH TỰ ĐỘNG ================= -->
@@ -34,7 +36,7 @@
                      izz="${(1/2) * mass * (radius*radius)}" />
         </inertial>
     </xacro:macro>
-    
+
     <!-- ================= VẬT LIỆU MÀU SẮC ================= -->
     <material name="white">
         <color rgba="1 1 1 1"/>
@@ -42,14 +44,30 @@
     <material name="orange">
         <color rgba="1 0.3 0.1 1"/>
     </material>
+    <material name="black">
+        <color rgba="0.1 0.1 0.1 1"/>
+    </material>
+    <material name="blue">
+        <color rgba="0.1 0.35 0.85 1"/>
+    </material>
+
+    <!-- ================= TÂM XE & BASE FOOTPRINT ================= -->
+    <!-- Giữ base_link làm root link để bảo toàn hệ quy chiếu gz:expressed_in="base_link" trong Gazebo -->
+    <link name="base_link"/>
+
+    <joint name="base_footprint_joint" type="fixed">
+        <parent link="base_link"/>
+        <child link="base_footprint"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+    </joint>
+
+    <link name="base_footprint"/>
 
     <!-- ================= THÂN XE HÌNH HỘP ================= -->
-    <link name="base_link"></link>
-
     <joint name="chassis_joint" type="fixed">
         <parent link="base_link"/>
         <child link="chassis"/>
-        <origin xyz="0 0 ${wheel_radius + chassis_height/2}"/> 
+        <origin xyz="0 0 ${wheel_radius + chassis_height/2}" rpy="0 0 0"/>
     </joint>
 
     <link name="chassis">
@@ -66,14 +84,14 @@
                 <box size="${chassis_length} ${chassis_width} ${chassis_height}"/>
             </geometry>
         </collision>
-        <!-- HẠ TRỌNG TÂM XUỐNG 5cm (z=-0.05) ĐỂ GHÌ XE XUỐNG MẶT ĐẤT -->
-        <xacro:inertial_box mass="4.4" x="${chassis_length}" y="${chassis_width}" z="${chassis_height}">
+        <!-- Hạ trọng tâm xuống 5cm (z=-0.05) để chống lật khi tăng tốc/trượt ngang -->
+        <xacro:inertial_box mass="${chassis_mass}" x="${chassis_length}" y="${chassis_width}" z="${chassis_height}">
             <origin xyz="0 0 -0.05" rpy="0 0 0"/>
         </xacro:inertial_box>
     </link>
 
-    <!-- ================= KHUÔN ĐÚC BÁNH XE ================= -->
-    <xacro:macro name="mecanum_wheel" params="prefix x_reflect y_reflect">
+    <!-- ================= KHUÔN ĐÚC BÁNH XE MECANUM & VẬT LÝ GAZEBO ================= -->
+    <xacro:macro name="mecanum_wheel" params="prefix x_reflect y_reflect fdir1">
         <joint name="${prefix}_wheel_joint" type="continuous">
             <parent link="base_link"/>
             <child link="${prefix}_wheel"/>
@@ -89,118 +107,53 @@
                 </geometry>
                 <material name="orange"/>
             </visual>
-            <!-- Va chạm dùng hình cầu để trượt ngang mượt mà -->
+            <!-- Va chạm hình cầu tiếp xúc 1 điểm giúp bánh xe trượt ngang mượt mà -->
             <collision>
                 <origin xyz="0 0 0" rpy="0 0 0"/>
                 <geometry>
                     <sphere radius="${wheel_radius}"/>
                 </geometry>
             </collision>
-            <xacro:inertial_cylinder mass="0.15" length="${wheel_thickness}" radius="${wheel_radius}">
+            <xacro:inertial_cylinder mass="${wheel_mass}" length="${wheel_thickness}" radius="${wheel_radius}">
                 <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
             </xacro:inertial_cylinder>
         </link>
+
+        <!-- Cấu hình ma sát dị hướng (fdir1) chuẩn cho con lăn 45 độ trên Gazebo Harmonic -->
+        <gazebo reference="${prefix}_wheel">
+            <collision>
+                <surface>
+                    <friction>
+                        <ode>
+                            <mu>2.0</mu>
+                            <mu2>0.0</mu2>
+                            <fdir1 gz:expressed_in="base_link">${fdir1}</fdir1>
+                        </ode>
+                    </friction>
+                    <contact>
+                        <ode>
+                            <kp>100000.0</kp>
+                            <kd>10.0</kd>
+                            <max_vel>0.1</max_vel>
+                            <min_depth>0.001</min_depth>
+                        </ode>
+                    </contact>
+                </surface>
+            </collision>
+        </gazebo>
     </xacro:macro>
 
     <!-- ================= GẮN 4 BÁNH XE VÀO 4 GÓC ================= -->
-    <xacro:mecanum_wheel prefix="front_left" x_reflect="1" y_reflect="1" />
-    <xacro:mecanum_wheel prefix="front_right" x_reflect="1" y_reflect="-1" />
-    <xacro:mecanum_wheel prefix="rear_left" x_reflect="-1" y_reflect="1" />
-    <xacro:mecanum_wheel prefix="rear_right" x_reflect="-1" y_reflect="-1" />
+    <!-- Cặp Trước Trái & Sau Phải: Vector ma sát 1 -1 0 -->
+    <xacro:mecanum_wheel prefix="front_left"  x_reflect="1"  y_reflect="1"  fdir1="1 -1 0" />
+    <xacro:mecanum_wheel prefix="rear_right"  x_reflect="-1" y_reflect="-1" fdir1="1 -1 0" />
 
-    <!-- ================= CẤU HÌNH VẬT LÝ GAZEBO ĐÃ SỬA LỖI ================= -->
-    
-    <!-- Cặp Trước Trái & Sau Phải: Vector ma sát 1 1 0 -->
-    <gazebo reference="front_left_wheel">
-        <collision>
-            <surface>
-                <friction>
-                    <ode>
-                        <mu>1.0</mu>
-                        <mu2>0.0</mu2>
-                        <fdir1 gz:expressed_in="base_link">1 1 0</fdir1>
-                    </ode>
-                </friction>
-                <contact>
-                    <ode>
-                        <kp>100000.0</kp>
-                        <kd>10.0</kd>
-                        <max_vel>0.1</max_vel>
-                        <min_depth>0.001</min_depth>
-                    </ode>
-                </contact>
-            </surface>
-        </collision>
-    </gazebo>
-
-    <gazebo reference="rear_right_wheel">
-        <collision>
-            <surface>
-                <friction>
-                    <ode>
-                        <mu>1.0</mu>
-                        <mu2>0.0</mu2>
-                        <fdir1 gz:expressed_in="base_link">1 1 0</fdir1>
-                    </ode>
-                </friction>
-                <contact>
-                    <ode>
-                        <kp>100000.0</kp>
-                        <kd>10.0</kd>
-                        <max_vel>0.1</max_vel>
-                        <min_depth>0.001</min_depth>
-                    </ode>
-                </contact>
-            </surface>
-        </collision>
-    </gazebo>
-
-    <!-- Cặp Trước Phải & Sau Trái: Vector ma sát 1 -1 0 -->
-    <gazebo reference="front_right_wheel">
-        <collision>
-            <surface>
-                <friction>
-                    <ode>
-                        <mu>1.0</mu>
-                        <mu2>0.0</mu2>
-                        <fdir1 gz:expressed_in="base_link">1 -1 0</fdir1>
-                    </ode>
-                </friction>
-                <contact>
-                    <ode>
-                        <kp>100000.0</kp>
-                        <kd>10.0</kd>
-                        <max_vel>0.1</max_vel>
-                        <min_depth>0.001</min_depth>
-                    </ode>
-                </contact>
-            </surface>
-        </collision>
-    </gazebo>
-
-    <gazebo reference="rear_left_wheel">
-        <collision>
-            <surface>
-                <friction>
-                    <ode>
-                        <mu>1.0</mu>
-                        <mu2>0.0</mu2>
-                        <fdir1 gz:expressed_in="base_link">1 -1 0</fdir1>
-                    </ode>
-                </friction>
-                <contact>
-                    <ode>
-                        <kp>100000.0</kp>
-                        <kd>10.0</kd>
-                        <max_vel>0.1</max_vel>
-                        <min_depth>0.001</min_depth>
-                    </ode>
-                </contact>
-            </surface>
-        </collision>
-    </gazebo>
+    <!-- Cặp Trước Phải & Sau Trái: Vector ma sát 1 1 0 -->
+    <xacro:mecanum_wheel prefix="front_right" x_reflect="1"  y_reflect="-1" fdir1="1 1 0" />
+    <xacro:mecanum_wheel prefix="rear_left"   x_reflect="-1" y_reflect="1"  fdir1="1 1 0" />
 
     <!-- ================= NHÚNG CÁC FILE MỞ RỘNG ================= -->
-    <xacro:include filename="ros2_control.xacro" />
-    <xacro:include filename="lidar.xacro" />
+    <xacro:include filename="$(find mecanum_description)/urdf/ros2_control.xacro" />
+    <xacro:include filename="$(find mecanum_description)/urdf/lidar.xacro" />
+    <xacro:include filename="$(find mecanum_description)/urdf/imu.xacro" />
 </robot>

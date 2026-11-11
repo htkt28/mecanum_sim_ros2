@@ -2,15 +2,28 @@ controller_manager:
   ros__parameters:
     update_rate: 50
     use_sim_time: true
-
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
-
     mecanum_base_controller:
       type: mecanum_drive_controller/MecanumDriveController
 
 mecanum_base_controller:
   ros__parameters:
+    use_sim_time: true
+
+    # Giữ lệnh vận tốc trong 0.5s giữa các bản tin điều khiển và tự phanh nếu mất tín hiệu
+    reference_timeout: 0.5
+
+    odom_frame_id: "odom"
+    base_frame_id: "base_link"
+    # Tắt phát TF trực tiếp từ bánh xe để nhường cho bộ lọc EKF (hợp nhất Encoder + MPU6050) phát TF odom->base_link
+    enable_odom_tf: false
+    tf_frame_prefix_enable: false
+
+    # Hiệp phương sai phản ánh đặc trưng vật lý Mecanum (trục ngang Y và xoay Z dễ trượt con lăn hơn trục dọc X)
+    pose_covariance_diagonal: [0.01, 0.03, 0.001, 0.001, 0.001, 0.05]
+    twist_covariance_diagonal: [0.005, 0.02, 0.001, 0.001, 0.001, 0.05]
+
     front_left_wheel_command_joint_name: "front_left_wheel_joint"
     front_right_wheel_command_joint_name: "front_right_wheel_joint"
     rear_right_wheel_command_joint_name: "rear_right_wheel_joint"
@@ -20,23 +33,20 @@ mecanum_base_controller:
       wheels_radius: 0.0485
       sum_of_robot_center_projection_on_X_Y_axis: 0.275
 
-    use_stamped_vel: true
-
-    # BỔ SUNG GIỚI HẠN GIA TỐC (CHỐNG TRƯỢT KHI NHẬN LỆNH TELEOP)
     linear:
       x:
-        has_velocity_limits: true
-        max_velocity: 1.0
-        has_acceleration_limits: true
-        max_acceleration: 0.8
+        max_velocity: 0.5
+        min_velocity: -0.5
+        max_acceleration: 0.6
+        max_deceleration: -0.8
       y:
-        has_velocity_limits: true
-        max_velocity: 1.0
-        has_acceleration_limits: true
-        max_acceleration: 0.8
+        max_velocity: 0.5
+        min_velocity: -0.5
+        max_acceleration: 0.6
+        max_deceleration: -0.8
     angular:
       z:
-        has_velocity_limits: true
-        max_velocity: 1.5
-        has_acceleration_limits: true
+        max_velocity: 1.2
+        min_velocity: -1.2
         max_acceleration: 1.0
+        max_deceleration: -1.2
