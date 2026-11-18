@@ -113,7 +113,14 @@ def generate_launch_description():
     joint_state_broadcaster_spawner = Node(
         package='controller_manager',
         executable='spawner',
-        arguments=['joint_state_broadcaster', '--ros-args', '-p', 'use_sim_time:=true'],
+        arguments=[
+            'joint_state_broadcaster',
+            '--switch-timeout',
+            '30.0',
+            '--ros-args',
+            '-p',
+            'use_sim_time:=true',
+        ],
     )
 
     # Xuất Odometry thô của encoder bánh xe vào /wheel/odom làm đầu vào cho bộ lọc EKF
@@ -122,6 +129,8 @@ def generate_launch_description():
         executable='spawner',
         arguments=[
             'mecanum_base_controller',
+            '--switch-timeout',
+            '30.0',
             '--controller-ros-args',
             '-r /mecanum_base_controller/odometry:=/wheel/odom',
             '--ros-args',
@@ -130,10 +139,17 @@ def generate_launch_description():
         ],
     )
 
-    delayed_controllers = RegisterEventHandler(
+    delayed_joint_broadcaster = RegisterEventHandler(
         event_handler=OnProcessExit(
             target_action=spawn_entity,
-            on_exit=[joint_state_broadcaster_spawner, mecanum_controller_spawner],
+            on_exit=[joint_state_broadcaster_spawner],
+        )
+    )
+
+    delayed_mecanum_controller = RegisterEventHandler(
+        event_handler=OnProcessExit(
+            target_action=joint_state_broadcaster_spawner,
+            on_exit=[mecanum_controller_spawner],
         )
     )
 
@@ -159,6 +175,7 @@ def generate_launch_description():
         ros_gz_bridge,
         node_twist_stamper,
         node_ekf,
-        delayed_controllers,
+        delayed_joint_broadcaster,
+        delayed_mecanum_controller,
         node_rviz,
     ])

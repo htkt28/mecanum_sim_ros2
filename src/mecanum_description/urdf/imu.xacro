@@ -7,11 +7,12 @@
     <xacro:property name="imu_height" value="0.003"/>
     <xacro:property name="imu_mass" value="0.005"/>
 
-    <!-- 1. Đặt MPU6050 đúng tâm trục xoay (x=0, y=0) để triệt tiêu gia tốc hướng tâm khi xe quay -->
+    <!-- 1. Đặt MPU6050 tại tâm mặt trên của Tầng 1 (z = wheel_radius + wheel_to_layer1_bottom_z + layer1_height + imu_height/2),
+         nằm gọn trong khoang bảo vệ giữa Tầng 1 và Tầng 2 -->
     <joint name="imu_joint" type="fixed">
         <parent link="base_link"/>
         <child link="imu_link"/>
-        <origin xyz="0 0 ${wheel_radius + 0.01}" rpy="0 0 0"/>
+        <origin xyz="0 0 ${wheel_radius + wheel_to_layer1_bottom_z + layer1_height + imu_height/2}" rpy="0 0 0"/>
     </joint>
 
     <!-- 2. Khung vật lý của module MPU6050 -->

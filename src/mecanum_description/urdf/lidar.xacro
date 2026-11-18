@@ -6,11 +6,12 @@
     <xacro:property name="lidar_length" value="0.0388"/>
     <xacro:property name="lidar_mass" value="0.143"/>
 
-    <!-- 1. Khớp nối cố định đặt LD14 trên nóc thân xe -->
+    <!-- 1. Khớp nối cố định đặt LD14 trên mặt Tầng 2, xoay góc yaw = pi (180 độ)
+         khớp với chiều lắp thực tế của LD14 (tia 0 độ hướng về đuôi xe, tia 180 độ hướng về mũi xe) -->
     <joint name="laser_joint" type="fixed">
         <parent link="chassis"/>
         <child link="laser_frame"/>
-        <origin xyz="0 0 ${(chassis_height + lidar_length)/2}" rpy="0 0 0"/>
+        <origin xyz="${layer2_offset_x + 0.04} 0 ${layer1_height/2 + layer2_elevation + lidar_length/2}" rpy="0 0 ${pi}"/>
     </joint>
 
     <!-- 2. Khung vật lý của LD14 -->

@@ -433,4 +433,51 @@ IV. BẢNG ÁNH XẠ THUẬT TOÁN VÀ FILE CẤU HÌNH TRONG WORKSPACE
 8. Thuật toán AMCL Omni, Costmap 2D, A*, MPPI Omni, Velocity Smoother:
    -> src/mecanum_description/config/nav2_params.yaml
    -> src/mecanum_description/launch/navigation.launch.py
+
+9. Firmware Điều khiển PID 4 bánh Mecanum & Đọc Cảm biến trên ESP32:
+   -> esp32_mecanum_firmware/platformio.ini
+   -> esp32_mecanum_firmware/src/main.cpp
+
+10. Cầu nối Phần cứng ROS 2, Khử trôi ZUPT & Tự động nhận diện USB trên Pi 5:
+   -> src/mecanum_description/scripts/esp32_bridge.py
+   -> src/mecanum_description/launch/real_robot.launch.py
+
+
+================================================================================
+V. GIAI ĐOẠN TRIỂN KHAI THỰC TẾ TRÊN PHẦN CỨNG (SIM-TO-REAL DEPLOYMENT)
+================================================================================
+
+1. KẾT CẤU CƠ KHÍ KHUNG XE 2 TẦNG THỰC TẾ:
+   - Tầng 1 (Đế dưới): 30 x 24 x 2 cm, khoảng cách từ tâm trục bánh xe lên mép
+     dưới Tầng 1 là 3.0 cm (chừa khoảng trống mũi Tầng 1 rộng 10 x 24 cm để mở
+     rộng lắp đặt tay máy robot).
+   - Tầng 2 (Đế trên): 20 x 24 x 1 cm, nâng cao +8.0 cm so với Tầng 1 và đặt sát
+     về phía đuôi xe trên 4 trụ chống, bố trí LiDAR LDobot LD14 trên mặt Tầng 2
+     (xoay góc yaw = pi rad khớp hướng lắp đặt thực tế) và MPU6050 ở mặt Tầng 1.
+
+2. THUẬT TOÁN VÒNG KÍN PID VẬN TỐC 4 BÁNH & ĐỌC XUNG PCNT TRÊN ESP32 (40 Hz):
+   - Sử dụng bộ đếm xung phần cứng PCNT ở chế độ Full-Quadrature (4 sườn xung)
+     cho động cơ JGB37-520 (1:30, 11 PPR) đạt độ phân giải 1320 xung/vòng bánh.
+   - Lọc thông thấp bậc 1 cho vận tốc đo từ Encoder:
+       v_filtered(k) = 0.7 * v_raw(k) + 0.3 * v_filtered(k-1)
+   - 4 bộ điều khiển PID rời rạc độc lập (Kp = 220, Ki = 850, Kd = 8) có chống
+     bão hòa tích phân (Anti-windup) và xóa tích phân khi đảo chiều, băm xung
+     kép RPWM/LPWM tần số siêu âm 20 kHz qua 4 mạch cầu H BTS7960.
+   - Tích hợp cơ chế Watchdog phần cứng 500 ms tự động ngắt PWM nếu mất kết nối.
+
+3. THUẬT TOÁN KHỬ TRÔI CON QUAY HỒI CHUYỂN ZUPT (ZERO-VELOCITY UPDATE):
+   - Khắc phục triệt để hiện tượng trôi điểm 0 (Gyro Bias Drift) của cảm biến
+     MEMS MPU6050 do rung động lúc khởi động hoặc thay đổi nhiệt độ:
+     + Khi cả 4 Encoder báo vận tốc bằng 0 (|vx| < 0.002, |vy| < 0.002,
+       |wz| < 0.005) và không có lệnh /cmd_vel, hệ thống cập nhật liên tục ước
+       lượng độ trôi b_gz = 0.95 * b_gz + 0.05 * gz_raw và khóa vận tốc góc đầu
+       ra gz_clean = 0.0 rad/s.
+     + Khi xe chuyển động, vận tốc góc thực được khử sạch độ trôi:
+       gz_clean = gz_raw - b_gz, sau đó tích phân lên góc hướng gửi vào bộ lọc EKF.
+
+4. TRUYỀN THÔNG ROS 2 PHÂN TÁN QUA WI-FI & TỰ ĐỘNG NHẬN DIỆN CỔNG USB:
+   - Raspberry Pi 5 đảm nhận đọc phần cứng thời gian thực (LD14 6 Hz, ESP32
+     Bridge 40 Hz, Robot State Publisher, EKF 50 Hz) và truyền thông Unicast DDS
+     (ROS_STATIC_PEERS) độ trễ thấp sang trạm điều khiển Laptop chạy SLAM
+     Toolbox và Nav2 MPPI Omni, giúp xe vận hành tự hành ổn định ngoài thực tế.
 ================================================================================

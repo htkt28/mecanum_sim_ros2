@@ -4,3 +4,5 @@ log/
 .vscode/
 *.pyc
 __pycache__/
+esp32_mecanum_firmware/.pio/
+esp32_mecanum_firmware/idedata.json

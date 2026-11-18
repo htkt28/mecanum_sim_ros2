@@ -1,10 +1,22 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" xmlns:gz="http://gazebosim.org/schema" name="mecanum_robot">
 
-    <!-- 1. KHAI BÁO KÍCH THƯỚC THÂN XE -->
-    <xacro:property name="chassis_length" value="0.3"/>
+    <!-- 1. KHAI BÁO KÍCH THƯỚC KHUNG XE 2 TẦNG -->
+    <!-- Tầng 1: Dài 30cm (0.30m), Rộng 24cm (0.24m), Dày 2cm (0.02m) -->
+    <xacro:property name="chassis_length" value="0.30"/>
     <xacro:property name="chassis_width" value="0.24"/>
-    <xacro:property name="chassis_height" value="0.11"/>
+    <xacro:property name="layer1_height" value="0.02"/>
+
+    <!-- Tầng 2: Dài 20cm (0.20m), Rộng 24cm (0.24m), Cao thêm 8cm (0.08m) tính từ Tầng 1,
+         lùi sát về phía đuôi xe (mép sau Tầng 2 trùng với mép đuôi Tầng 1 tại x = -0.15m) -->
+    <xacro:property name="layer2_length" value="0.20"/>
+    <xacro:property name="layer2_width" value="0.24"/>
+    <xacro:property name="layer2_offset_x" value="${-(chassis_length - layer2_length)/2}"/>
+    <xacro:property name="layer2_elevation" value="0.08"/>
+    <xacro:property name="layer2_thickness" value="0.01"/>
+    <xacro:property name="standoff_height" value="${layer2_elevation - layer2_thickness}"/>
+    <xacro:property name="standoff_radius" value="0.006"/>
+    <xacro:property name="chassis_total_height" value="${layer1_height + layer2_elevation}"/>
     <xacro:property name="chassis_mass" value="4.4"/>
 
     <!-- 2. KÍCH THƯỚC BÁNH XE MECANUM -->
@@ -15,6 +27,8 @@
     <!-- 3. TỌA ĐỘ ĐẶT BÁNH (Lx + Ly = 0.125 + 0.15 = 0.275m) -->
     <xacro:property name="wheel_offset_x" value="0.125"/>
     <xacro:property name="wheel_offset_y" value="0.15"/>
+    <!-- Khoảng cách theo phương thẳng đứng từ tâm trục bánh xe lên mép dưới của Tầng 1: 3cm (0.03m) -->
+    <xacro:property name="wheel_to_layer1_bottom_z" value="0.03"/>
 
     <!-- ================= CÔNG THỨC TÍNH QUÁN TÍNH TỰ ĐỘNG ================= -->
     <xacro:macro name="inertial_box" params="mass x y z *origin">
@@ -39,7 +53,10 @@
 
     <!-- ================= VẬT LIỆU MÀU SẮC ================= -->
     <material name="white">
-        <color rgba="1 1 1 1"/>
+        <color rgba="0.95 0.95 0.95 1"/>
+    </material>
+    <material name="grey">
+        <color rgba="0.55 0.58 0.62 1"/>
     </material>
     <material name="orange">
         <color rgba="1 0.3 0.1 1"/>
@@ -63,30 +80,60 @@
 
     <link name="base_footprint"/>
 
-    <!-- ================= THÂN XE HÌNH HỘP ================= -->
+    <!-- ================= THÂN XE KẾT CẤU 2 TẦNG ================= -->
+    <!-- Mép dưới Tầng 1 cao hơn tâm bánh xe 3cm (0.03m) -> Tâm Tầng 1 ở z = wheel_radius + 0.03 + layer1_height/2 = 0.0885m -->
     <joint name="chassis_joint" type="fixed">
         <parent link="base_link"/>
         <child link="chassis"/>
-        <origin xyz="0 0 ${wheel_radius + chassis_height/2}" rpy="0 0 0"/>
+        <origin xyz="0 0 ${wheel_radius + wheel_to_layer1_bottom_z + layer1_height/2}" rpy="0 0 0"/>
     </joint>
 
+    <xacro:macro name="standoff_visual" params="x_sign y_sign">
+        <visual>
+            <origin xyz="${layer2_offset_x + x_sign * (layer2_length/2 - 0.015)} ${y_sign * (layer2_width/2 - 0.015)} ${layer1_height/2 + standoff_height/2}" rpy="0 0 0"/>
+            <geometry>
+                <cylinder radius="${standoff_radius}" length="${standoff_height}"/>
+            </geometry>
+            <material name="grey"/>
+        </visual>
+    </xacro:macro>
+
     <link name="chassis">
+        <!-- Tầng 1: Đế dưới 30x24cm, dày 2cm (0.02m) -->
         <visual>
             <origin xyz="0 0 0" rpy="0 0 0"/>
             <geometry>
-                <box size="${chassis_length} ${chassis_width} ${chassis_height}"/>
+                <box size="${chassis_length} ${chassis_width} ${layer1_height}"/>
             </geometry>
             <material name="white"/>
         </visual>
-        <collision>
-            <origin xyz="0 0 0" rpy="0 0 0"/>
+
+        <!-- 4 Trụ chống tại 4 góc Tầng 2 (2 cột sau sát đuôi xe tại x = -0.135m, 2 cột trước tại x = +0.035m) -->
+        <xacro:standoff_visual x_sign="1"  y_sign="1"/>
+        <xacro:standoff_visual x_sign="1"  y_sign="-1"/>
+        <xacro:standoff_visual x_sign="-1" y_sign="1"/>
+        <xacro:standoff_visual x_sign="-1" y_sign="-1"/>
+
+        <!-- Tầng 2: 20x24cm, lùi sát đuôi xe (tâm ở x = -0.05m), cao thêm 8cm từ Tầng 1 -->
+        <visual>
+            <origin xyz="${layer2_offset_x} 0 ${layer1_height/2 + layer2_elevation - layer2_thickness/2}" rpy="0 0 0"/>
             <geometry>
-                <box size="${chassis_length} ${chassis_width} ${chassis_height}"/>
+                <box size="${layer2_length} ${layer2_width} ${layer2_thickness}"/>
+            </geometry>
+            <material name="white"/>
+        </visual>
+
+        <!-- Khung va chạm bao toàn bộ khối 2 tầng (cao 10cm) -->
+        <collision>
+            <origin xyz="0 0 ${layer2_elevation/2}" rpy="0 0 0"/>
+            <geometry>
+                <box size="${chassis_length} ${chassis_width} ${chassis_total_height}"/>
             </geometry>
         </collision>
-        <!-- Hạ trọng tâm xuống 5cm (z=-0.05) để chống lật khi tăng tốc/trượt ngang -->
-        <xacro:inertial_box mass="${chassis_mass}" x="${chassis_length}" y="${chassis_width}" z="${chassis_height}">
-            <origin xyz="0 0 -0.05" rpy="0 0 0"/>
+
+        <!-- Trọng tâm đặt thấp ở cụm 4 động cơ dưới gầm Tầng 1 để chống lật khi tăng tốc/trượt ngang -->
+        <xacro:inertial_box mass="${chassis_mass}" x="${chassis_length}" y="${chassis_width}" z="${chassis_total_height}">
+            <origin xyz="0 0 -0.03" rpy="0 0 0"/>
         </xacro:inertial_box>
     </link>
 

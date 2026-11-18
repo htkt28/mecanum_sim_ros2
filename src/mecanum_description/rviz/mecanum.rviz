@@ -10,7 +10,7 @@ Panels:
         - /RobotModel1
         - /LaserScan1
       Splitter Ratio: 0.5
-    Tree Height: 188
+    Tree Height: 363
   - Class: rviz_common/Selection
     Name: Selection
   - Class: rviz_common/Tool Properties
@@ -164,6 +164,11 @@ Visualization Manager:
           Show Axes: false
           Show Trail: false
           Value: true
+        imu_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
         laser_frame:
           Alpha: 1
           Show Axes: false
@@ -204,6 +209,8 @@ Visualization Manager:
           Value: true
         front_right_wheel:
           Value: true
+        imu_link:
+          Value: true
         laser_frame:
           Value: true
         map:
@@ -231,6 +238,8 @@ Visualization Manager:
               front_left_wheel:
                 {}
               front_right_wheel:
+                {}
+              imu_link:
                 {}
               rear_left_wheel:
                 {}
@@ -318,22 +327,22 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 11.323586463928223
+      Distance: 4.865631103515625
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 0
-        Y: 0
-        Z: 0
+        X: -0.3786965608596802
+        Y: 0.15977992117404938
+        Z: 0.1250842958688736
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 1.1600000858306885
+      Pitch: 1.2649999856948853
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
       Yaw: 6.153184413909912
